@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Find Nearby Stores</title>
+  <title>Map UI - Closest Stores</title>
   <style>
     body { font-family: Arial, sans-serif; max-width: 900px; margin: 28px auto; padding: 0 16px; }
+    h1 { margin: 0 0 6px; }
     .muted { color:#666; font-size: 0.95rem; }
     .panel { border:1px solid #ddd; border-radius:14px; padding:14px; margin:12px 0; }
     .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
@@ -15,17 +16,22 @@
     .pill { display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #ddd; font-size:0.85rem; }
     .card { border:1px solid #e2e2e2; border-radius:14px; padding:12px; margin:10px 0; }
     .card-title { display:flex; justify-content:space-between; gap:10px; }
+    .mono { font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
-  <h2>Find the 10 closest stores</h2>
-  <div class="muted">Enter a full address → it geocodes to lat/lng → shows 10 nearest stores.</div>
+
+  <h1>Find the 10 closest stores</h1>
+  <div class="muted">
+    Enter a full address → converts to latitude/longitude → shows 10 nearest stores.
+  </div>
 
   <div class="panel">
     <div class="row">
-      <input id="address" placeholder="Enter full address (e.g., 65-30 Kissena Blvd, Queens, NY 11367)" />
+      <input id="address" placeholder="Try: 65-30 Kissena Blvd, Queens, NY 11367" />
       <button id="addrBtn">Search by Address</button>
-      <span class="pill" id="status">Idle</span>
+      <button id="clearBtn">Clear</button>
+      <span class="pill" id="status">Loading Google…</span>
     </div>
     <div class="muted" style="margin-top:8px;">
       Tip: include city + state for best results.
@@ -33,12 +39,12 @@
   </div>
 
   <div class="panel">
-    <b>Closest Stores</b>
+    <b>Results (closest 10)</b>
     <div id="results"></div>
   </div>
 
 <script>
-  // ---------- Dummy stores ----------
+  // ------------------ Dummy stores (later replace from DB/API) ------------------
   const stores = [
     { id: 1,  name: "Queens Mini Mart",     lat: 40.7349, lon: -73.8150, address: "Main St, Queens, NY" },
     { id: 2,  name: "Fresh Corner Grocery", lat: 40.7412, lon: -73.8209, address: "Kissena Blvd, Queens, NY" },
@@ -54,7 +60,7 @@
     { id:12,  name: "Jamaica Value Store",  lat: 40.7027, lon: -73.7890, address: "Jamaica Ave, Queens, NY" },
   ];
 
-  // ---------- Distance ----------
+  // ------------------ Haversine distance (miles) ------------------
   function haversineMiles(lat1, lon1, lat2, lon2) {
     const R = 3958.8;
     const toRad = d => d * Math.PI / 180;
@@ -66,65 +72,78 @@
     return 2 * R * Math.asin(Math.sqrt(a));
   }
 
-  const statusEl = document.getElementById("status");
+  const statusEl  = document.getElementById("status");
   const resultsEl = document.getElementById("results");
   const addressEl = document.getElementById("address");
 
+  function setStatus(t) { statusEl.textContent = t; }
+
   function renderStores(centerLat, centerLon, label) {
-    statusEl.textContent = label;
+    setStatus(label);
 
     const ranked = stores
       .map(s => ({ ...s, dist: haversineMiles(centerLat, centerLon, s.lat, s.lon) }))
-      .sort((a,b) => a.dist - b.dist)
+      .sort((a, b) => a.dist - b.dist)
       .slice(0, 10);
 
     resultsEl.innerHTML = ranked.map(s => `
       <div class="card">
         <div class="card-title">
           <b>${s.name}</b>
-          <span>${s.dist.toFixed(2)} mi</span>
+          <span class="mono">${s.dist.toFixed(2)} mi</span>
         </div>
         <div class="muted">${s.address}</div>
       </div>
     `).join("");
   }
 
-  // ---------- Google Geocoder (Maps JavaScript API) ----------
-  let geocoder;
+  function clearAll() {
+    addressEl.value = "";
+    resultsEl.innerHTML = "";
+    setStatus("Ready");
+  }
 
+  // ------------------ Google Geocoder (Maps JS API) ------------------
+  let geocoder = null;
+
+  // Called by Google script callback
   function initGoogle() {
     geocoder = new google.maps.Geocoder();
-
-    document.getElementById("addrBtn").addEventListener("click", geocodeAddress);
-    addressEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") geocodeAddress();
-    });
-
-    statusEl.textContent = "Ready";
+    setStatus("Ready");
   }
+  window.initGoogle = initGoogle;
 
   function geocodeAddress() {
     const addr = addressEl.value.trim();
-    if (!addr) { statusEl.textContent = "Type an address."; return; }
-    if (!geocoder) { statusEl.textContent = "Google API not loaded."; return; }
+    if (!addr) { setStatus("Type an address."); return; }
+    if (!geocoder) { setStatus("Google not loaded."); return; }
 
-    statusEl.textContent = "Geocoding…";
+    setStatus("Geocoding…");
 
     geocoder.geocode({ address: addr }, (results, status) => {
       if (status !== "OK" || !results || !results.length) {
-        // This will show REQUEST_DENIED if key/restrictions/billing are wrong
-        statusEl.textContent = `Geocode failed: ${status}`;
+        // If key/referrer/billing is wrong, you'll see REQUEST_DENIED
+        setStatus("Geocode failed: " + status);
         return;
       }
       const loc = results[0].geometry.location;
-      renderStores(loc.lat(), loc.lng(), `Using: ${addr}`);
+      renderStores(loc.lat(), loc.lng(), "Using address: " + addr);
     });
   }
+
+  document.getElementById("addrBtn").addEventListener("click", geocodeAddress);
+  document.getElementById("clearBtn").addEventListener("click", clearAll);
+  addressEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") geocodeAddress();
+  });
 </script>
 
-<!-- IMPORTANT: enable Maps JavaScript API + restrict key to your GitHub Pages domain -->
+<!-- IMPORTANT:
+  1) Enable "Maps JavaScript API" in Google Cloud
+  2) Restrict key to: https://anupa3.github.io/*
+-->
 <script async defer
-  src="https://maps.googleapis.com/maps/api/js?key=YOUR_KEY_HERE&callback=initGoogle">
+  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDgcQyHeXwmdA_MR8GR04I2VGCpW9RaZ9c&callback=initGoogle">
 </script>
 
 </body>
